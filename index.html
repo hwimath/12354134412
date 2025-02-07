@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>약수와 배수 심화(1)</title>
+  <style>
+    body {
+      background-color: #ffffff;
+      color: #000000;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      width: 90%;
+      max-width: 800px;
+      margin: 20px auto;
+      text-align: center;
+    }
+    button, input, select {
+      font-size: 1rem;
+      padding: 8px 12px;
+      margin: 5px;
+    }
+    #energyBarContainer {
+      width: 100%;
+      height: 20px;
+      background-color: #cccccc;
+      margin: 10px 0;
+      position: relative;
+    }
+    #energyBar {
+      height: 100%;
+      background-color: #000000;
+      width: 100%;
+    }
+    .choice-button {
+      display: block;
+      width: 90%;
+      margin: 8px auto;
+      text-align: left;
+      border: 1px solid #000000;
+      background-color: #ffffff;
+      cursor: pointer;
+    }
+    .disabled {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    #nextButton {
+      margin-top: 15px;
+    }
+    hr {
+      border: 1px solid #000000;
+      margin: 20px 0;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+</head>
+<body>
+  <!-- 시작 화면 -->
+  <div id="startScreen" class="container">
+    <h1>약수와 배수 심화(1)</h1>
+    <p>이름을 입력하세요:</p>
+    <input type="text" id="playerName" placeholder="이름">
+    <p>난이도를 선택하세요:</p>
+    <select id="difficultySelect">
+      <option value="최상">최상 (20초, 20점)</option>
+      <option value="상">상 (30초, 15점)</option>
+      <option value="중">중 (40초, 13점)</option>
+      <option value="하">하 (시간제한 없음, 10점)</option>
+    </select>
+    <br>
+    <button id="startButton">게임 시작</button>
+  </div>
+
+  <!-- 게임 화면 -->
+  <div id="gameScreen" class="container" style="display:none;">
+    <h1>약수와 배수 심화(1)</h1>
+    <div>
+      <span id="overallTimeDisplay">총 경과 시간: 0초</span> | 
+      <span id="scoreDisplay">점수: 0</span> | 
+      <span id="chancesDisplay">남은 기회: 3</span>
+    </div>
+    <hr>
+    <div id="questionContainer" style="min-height:80px; margin-bottom:15px;"></div>
+    <div id="choicesContainer"></div>
+    <div id="energyBarContainer" style="display:none;">
+      <div id="energyBar"></div>
+    </div>
+    <button id="nextButton" class="disabled" disabled>다음문제</button>
+  </div>
+
+  <!-- 게임 오버 화면 -->
+  <div id="gameOverScreen" class="container" style="display:none;">
+    <h1>게임 종료</h1>
+    <p id="finalScoreDisplay"></p>
+    <p id="finalTimeDisplay"></p>
+    <button id="sendScoreButton">점수전송</button>
+    <pre id="response"></pre>
+  </div>
+
+  <script>
+    // 헬퍼 함수: 수식을 \(...\) 형태로 감싸기 (String.raw를 사용하여 불필요한 이스케이프 없이)
+    function m(expr) {
+      return String.raw`\(${expr}\)`;
+    }
+
+    // 전역 변수들
+    let userName = "";
+    let difficulty = "";
+    let score = 0;
+    let chances = 3;
+    let overallTime = 0; // 초 단위
+    let overallTimer = null;
+    let questionTimer = null;
+    let energyBarInterval = null;
+    let questionTimeLimit = null; // 초 (난이도에 따라)
+    let questionStartTime = null;
+    let currentQuestion = null;
+    let predeterminedIndex = 0;
+
+    // 난이도 설정: 시간제한(초)와 문제당 점수
+    const difficulties = {
+      "최상": { timeLimit: 20, points: 20 },
+      "상": { timeLimit: 30, points: 15 },
+      "중": { timeLimit: 40, points: 13 },
+      "하": { timeLimit: null, points: 10 }
+    };
+
+    // 미리 만들어진 28문항 (각 유형별 7문항)
+    const predeterminedQuestions = [
+      {
+        question: String.raw`어떤 자연수로 \(\,87\,\)을 나누면 \(\,3\,\)이 남고, \(\,76\,\)을 나누면 \(\,4\,\)가 남는다고 한다. 이와 같은 자연수의 개수는?`,
+        correct: String.raw`\(\,2\,\)`,
+        choices: [
+          String.raw`\(\,1\,\)`,
+          String.raw`\(\,2\,\)`,
+          String.raw`\(\,3\,\)`,
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,5\,\)`
+        ]
+      },
+      {
+        question: String.raw`어떤 자연수로 \(\,73\,\)을 나누면 \(\,1\,\)이 남고, \(\,61\,\)을 나누면 \(\,1\,\)이 남는다고 한다. 이와 같은 자연수의 개수는?`,
+        correct: String.raw`\(\,5\,\)`,
+        choices: [
+          String.raw`\(\,2\,\)`,
+          String.raw`\(\,3\,\)`,
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,5\,\)`,
+          String.raw`\(\,6\,\)`
+        ]
+      },
+      {
+        question: String.raw`어떤 자연수로 \(\,92\,\)을 나누면 \(\,2\,\)가 남고, \(\,76\,\)을 나누면 \(\,4\,\)가 남는다고 한다. 이와 같은 자연수의 개수는?`,
+        correct: String.raw`\(\,3\,\)`,
+        choices: [
+          String.raw`\(\,2\,\)`,
+          String.raw`\(\,3\,\)`,
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,5\,\)`,
+          String.raw`\(\,6\,\)`
+        ]
+      },
+      {
+        question: String.raw`어떤 자연수로 \(\,75\,\)을 나누면 \(\,3\,\)이 남고, \(\,53\,\)을 나누면 \(\,5\,\)가 남는다고 한다. 이와 같은 자연수의 개수는?`,
+        correct: String.raw`\(\,4\,\)`,
+        choices: [
+          String.raw`\(\,2\,\)`,
+          String.raw`\(\,3\,\)`,
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,5\,\)`,
+          String.raw`\(\,6\,\)`
+        ]
+      },
+      {
+        question: String.raw`어떤 자연수로 \(\,65\,\)을 나누면 \(\,1\,\)이 남고, \(\,51\,\)을 나누면 \(\,3\,\)이 남는다고 한다. 이와 같은 자연수의 개수는?`,
+        correct: String.raw`\(\,3\,\)`,
+        choices: [
+          String.raw`\(\,2\,\)`,
+          String.raw`\(\,3\,\)`,
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,5\,\)`,
+          String.raw`\(\,6\,\)`
+        ]
+      },
+      {
+        question: String.raw`어떤 자연수로 \(\,62\,\)을 나누면 \(\,2\,\)가 남고, \(\,43\,\)을 나누면 \(\,3\,\)이 남는다고 한다. 이와 같은 자연수의 개수는?`,
+        correct: String.raw`\(\,4\,\)`,
+        choices: [
+          String.raw`\(\,2\,\)`,
+          String.raw`\(\,3\,\)`,
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,5\,\)`,
+          String.raw`\(\,6\,\)`
+        ]
+      },
+      {
+        question: String.raw`어떤 자연수로 \(\,92\,\)을 나누면 \(\,2\,\)가 남고, \(\,64\,\)를 나누면 \(\,4\,\)가 남는다고 한다. 이와 같은 자연수의 개수는?`,
+        correct: String.raw`\(\,5\,\)`,
+        choices: [
+          String.raw`\(\,2\,\)`,
+          String.raw`\(\,3\,\)`,
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,5\,\)`,
+          String.raw`\(\,6\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,90\,\)cm, 세로가 \(\,84\,\)cm인 직사각형 모양의 색도화지를 잘라 가능한 한 큰 정사각형 꽃가루를 만들 때, 만들 수 있는 꽃가루의 개수는?`,
+        correct: String.raw`\(\,210\,\)`,
+        choices: [
+          String.raw`\(\,180\,\)`,
+          String.raw`\(\,196\,\)`,
+          String.raw`\(\,210\,\)`,
+          String.raw`\(\,225\,\)`,
+          String.raw`\(\,240\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,100\,\)cm, 세로가 \(\,80\,\)cm인 색도화지를 같은 방식으로 자를 때, 만들 수 있는 꽃가루의 개수는?`,
+        correct: String.raw`\(\,20\,\)`,
+        choices: [
+          String.raw`\(\,16\,\)`,
+          String.raw`\(\,18\,\)`,
+          String.raw`\(\,20\,\)`,
+          String.raw`\(\,22\,\)`,
+          String.raw`\(\,24\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,72\,\)cm, 세로가 \(\,54\,\)cm인 색도화지를 같은 방식으로 자를 때, 만들 수 있는 꽃가루의 개수는?`,
+        correct: String.raw`\(\,12\,\)`,
+        choices: [
+          String.raw`\(\,10\,\)`,
+          String.raw`\(\,12\,\)`,
+          String.raw`\(\,14\,\)`,
+          String.raw`\(\,15\,\)`,
+          String.raw`\(\,18\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,120\,\)cm, 세로가 \(\,90\,\)cm인 색도화지를 같은 방식으로 자를 때, 만들 수 있는 꽃가루의 개수는?`,
+        correct: String.raw`\(\,12\,\)`,
+        choices: [
+          String.raw`\(\,10\,\)`,
+          String.raw`\(\,12\,\)`,
+          String.raw`\(\,14\,\)`,
+          String.raw`\(\,16\,\)`,
+          String.raw`\(\,18\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,84\,\)cm, 세로가 \(\,70\,\)cm인 색도화지를 같은 방식으로 자를 때, 만들 수 있는 꽃가루의 개수는?`,
+        correct: String.raw`\(\,30\,\)`,
+        choices: [
+          String.raw`\(\,28\,\)`,
+          String.raw`\(\,30\,\)`,
+          String.raw`\(\,32\,\)`,
+          String.raw`\(\,36\,\)`,
+          String.raw`\(\,40\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,96\,\)cm, 세로가 \(\,64\,\)cm인 색도화지를 같은 방식으로 자를 때, 만들 수 있는 꽃가루의 개수는?`,
+        correct: String.raw`\(\,6\,\)`,
+        choices: [
+          String.raw`\(\,4\,\)`,
+          String.raw`\(\,6\,\)`,
+          String.raw`\(\,8\,\)`,
+          String.raw`\(\,10\,\)`,
+          String.raw`\(\,12\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,110\,\)cm, 세로가 \(\,88\,\)cm인 색도화지를 같은 방식으로 자를 때, 만들 수 있는 꽃가루의 개수는?`,
+        correct: String.raw`\(\,20\,\)`,
+        choices: [
+          String.raw`\(\,18\,\)`,
+          String.raw`\(\,20\,\)`,
+          String.raw`\(\,22\,\)`,
+          String.raw`\(\,24\,\)`,
+          String.raw`\(\,26\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,360\,\)cm, 세로가 \(\,210\,\)cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?`,
+        correct: String.raw`\(\,38\,\)`,
+        choices: [
+          String.raw`\(\,36\,\)`,
+          String.raw`\(\,38\,\)`,
+          String.raw`\(\,40\,\)`,
+          String.raw`\(\,42\,\)`,
+          String.raw`\(\,44\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,240\,\)cm, 세로가 \(\,180\,\)cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?`,
+        correct: String.raw`\(\,14\,\)`,
+        choices: [
+          String.raw`\(\,12\,\)`,
+          String.raw`\(\,14\,\)`,
+          String.raw`\(\,16\,\)`,
+          String.raw`\(\,18\,\)`,
+          String.raw`\(\,20\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,300\,\)cm, 세로가 \(\,210\,\)cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?`,
+        correct: String.raw`\(\,34\,\)`,
+        choices: [
+          String.raw`\(\,32\,\)`,
+          String.raw`\(\,34\,\)`,
+          String.raw`\(\,36\,\)`,
+          String.raw`\(\,38\,\)`,
+          String.raw`\(\,40\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,400\,\)cm, 세로가 \(\,250\,\)cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?`,
+        correct: String.raw`\(\,26\,\)`,
+        choices: [
+          String.raw`\(\,24\,\)`,
+          String.raw`\(\,26\,\)`,
+          String.raw`\(\,28\,\)`,
+          String.raw`\(\,30\,\)`,
+          String.raw`\(\,32\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,180\,\)cm, 세로가 \(\,150\,\)cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?`,
+        correct: String.raw`\(\,22\,\)`,
+        choices: [
+          String.raw`\(\,20\,\)`,
+          String.raw`\(\,22\,\)`,
+          String.raw`\(\,24\,\)`,
+          String.raw`\(\,26\,\)`,
+          String.raw`\(\,28\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,420\,\)cm, 세로가 \(\,280\,\)cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?`,
+        correct: String.raw`\(\,20\,\)`,
+        choices: [
+          String.raw`\(\,18\,\)`,
+          String.raw`\(\,20\,\)`,
+          String.raw`\(\,22\,\)`,
+          String.raw`\(\,24\,\)`,
+          String.raw`\(\,26\,\)`
+        ]
+      },
+      {
+        question: String.raw`가로가 \(\,330\,\)cm, 세로가 \(\,220\,\)cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?`,
+        correct: String.raw`\(\,10\,\)`,
+        choices: [
+          String.raw`\(\,8\,\)`,
+          String.raw`\(\,10\,\)`,
+          String.raw`\(\,12\,\)`,
+          String.raw`\(\,14\,\)`,
+          String.raw`\(\,16\,\)`
+        ]
+      },
+      {
+        question: String.raw`두 분수 \(\dfrac{25}{24}\)과 \(\dfrac{15}{28}\) 중 어느 것을 택하여 곱해도 자연수가 되도록 하는 가장 작은 기약분수는?`,
+        correct: String.raw`\(\dfrac{168}{5}\)`,
+        choices: [
+          String.raw`\(\dfrac{168}{4}\)`,
+          String.raw`\(\dfrac{168}{5}\)`,
+          String.raw`\(\dfrac{168}{6}\)`,
+          String.raw`\(\dfrac{168}{7}\)`,
+          String.raw`\(\dfrac{168}{3}\)`
+        ]
+      },
+      {
+        question: String.raw`두 분수 \(\dfrac{27}{26}\)과 \(\dfrac{18}{30}\) 중 어느 것을 택하여 곱해도 자연수가 되도록 하는 가장 작은 기약분수는?`,
+        correct: String.raw`\(\dfrac{130}{3}\)`,
+        choices: [
+          String.raw`\(\dfrac{390}{10}\)`,
+          String.raw`\(\dfrac{390}{8}\)`,
+          String.raw`\(\dfrac{130}{3}\)`,
+          String.raw`\(\dfrac{390}{12}\)`,
+          String.raw`\(\dfrac{390}{7}\)`
+        ]
+      },
+      {
+        question: String.raw`두 분수 \(\dfrac{32}{28}\)과 \(\dfrac{20}{36}\) 중 어느 것을 택하여 곱해도 자연수가 되도록 하는 가장 작은 기약분수는?`,
+        correct: String.raw`\(\,63\,\)`,
+        choices: [
+          String.raw`\(\,62\,\)`,
+          String.raw`\(\,63\,\)`,
+          String.raw`\(\dfrac{63}{2}\)`,
+          String.raw`\(\,64\,\)`,
+          String.raw`\(\,56\,\)`
+        ]
+      },
+      {
+        question: String.raw`두 분수 \(\dfrac{22}{20}\)과 \(\dfrac{16}{24}\) 중 어느 것을 택하여 곱해도 자연수가 되도록 하는 가장 작은 기약분수는?`,
+        correct: String.raw`\(\,30\,\)`,
+        choices: [
+          String.raw`\(\,28\,\)`,
+          String.raw`\(\,30\,\)`,
+          String.raw`\(\,32\,\)`,
+          String.raw`\(\,24\,\)`,
+          String.raw`\(\,36\,\)`
+        ]
+      },
+      {
+        question: String.raw`두 분수 \(\dfrac{26}{25}\)과 \(\dfrac{14}{21}\) 중 어느 것을 택하여 곱해도 자연수가 되도록 하는 가장 작은 기약분수는?`,
+        correct: String.raw`\(\dfrac{75}{2}\)`,
+        choices: [
+          String.raw`\(\dfrac{75}{3}\)`,
+          String.raw`\(\dfrac{75}{2}\)`,
+          String.raw`\(\dfrac{75}{4}\)`,
+          String.raw`\(\dfrac{75}{5}\)`,
+          String.raw`\(\dfrac{75}{1}\)`
+        ]
+      },
+      {
+        question: String.raw`두 분수 \(\dfrac{31}{29}\)과 \(\dfrac{19}{25}\) 중 어느 것을 택하여 곱해도 자연수가 되도록 하는 가장 작은 기약분수는?`,
+        correct: String.raw`\(\,725\,\)`,
+        choices: [
+          String.raw`\(\,700\,\)`,
+          String.raw`\(\,725\,\)`,
+          String.raw`\(\,750\,\)`,
+          String.raw`\(\,690\,\)`,
+          String.raw`\(\,760\,\)`
+        ]
+      }
+    ];
+
+    // 셔플 함수 (Fisher–Yates)
+    function shuffleArray(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+    }
+
+    // 시작 버튼 이벤트
+    document.getElementById("startButton").addEventListener("click", () => {
+      userName = document.getElementById("playerName").value.trim() || "익명";
+      difficulty = document.getElementById("difficultySelect").value;
+      score = 0;
+      chances = 3;
+      overallTime = 0;
+      predeterminedIndex = 0;
+      shuffleArray(predeterminedQuestions);
+      document.getElementById("startScreen").style.display = "none";
+      document.getElementById("gameScreen").style.display = "block";
+      updateHUD();
+      startOverallTimer();
+      loadNextQuestion();
+    });
+
+    // 전체 경과시간 업데이트
+    function startOverallTimer() {
+      overallTimer = setInterval(() => {
+        overallTime++;
+        document.getElementById("overallTimeDisplay").innerText = "총 경과 시간: " + overallTime + "초";
+      }, 1000);
+    }
+
+    // HUD 업데이트 (점수, 기회)
+    function updateHUD() {
+      document.getElementById("scoreDisplay").innerText = "점수: " + score;
+      document.getElementById("chancesDisplay").innerText = "남은 기회: " + chances;
+    }
+
+    // 다음 문제 불러오기
+    function loadNextQuestion() {
+      clearInterval(questionTimer);
+      clearInterval(energyBarInterval);
+      document.getElementById("nextButton").disabled = true;
+      document.getElementById("nextButton").classList.add("disabled");
+      document.getElementById("choicesContainer").innerHTML = "";
+      document.getElementById("energyBar").style.width = "100%";
+      document.getElementById("energyBarContainer").style.display = "none";
+
+      if (predeterminedIndex < predeterminedQuestions.length) {
+        currentQuestion = predeterminedQuestions[predeterminedIndex];
+        predeterminedIndex++;
+      } else {
+        currentQuestion = generateRandomQuestion();
+      }
+      document.getElementById("questionContainer").innerHTML = currentQuestion.question;
+      MathJax.typeset();
+
+      let choices = currentQuestion.choices.slice();
+      shuffleArray(choices);
+      const container = document.getElementById("choicesContainer");
+      choices.forEach(choiceText => {
+        const btn = document.createElement("button");
+        btn.innerHTML = choiceText;
+        btn.className = "choice-button";
+        btn.addEventListener("click", () => {
+          if (btn.classList.contains("disabled")) return;
+          disableChoices();
+          if (choiceText === currentQuestion.correct) {
+            btn.style.backgroundColor = "#a0e7a0";
+            score += difficulties[difficulty].points;
+          } else {
+            btn.style.backgroundColor = "#e7a0a0";
+            showCorrectAnswer();
+            chances--;
+          }
+          updateHUD();
+          document.getElementById("nextButton").disabled = false;
+          document.getElementById("nextButton").classList.remove("disabled");
+        });
+        container.appendChild(btn);
+      });
+      MathJax.typeset();
+
+      questionTimeLimit = difficulties[difficulty].timeLimit;
+      if (questionTimeLimit !== null) {
+        document.getElementById("energyBarContainer").style.display = "block";
+        questionStartTime = Date.now();
+        questionTimer = setTimeout(() => {
+          disableChoices();
+          showCorrectAnswer();
+          chances--;
+          updateHUD();
+          document.getElementById("nextButton").disabled = false;
+          document.getElementById("nextButton").classList.remove("disabled");
+        }, questionTimeLimit * 1000);
+        energyBarInterval = setInterval(updateEnergyBar, 50);
+      }
+    }
+
+    // 에너지바 업데이트
+    function updateEnergyBar() {
+      const elapsed = (Date.now() - questionStartTime) / 1000;
+      let remaining = Math.max(0, questionTimeLimit - elapsed);
+      let percent = (remaining / questionTimeLimit) * 100;
+      document.getElementById("energyBar").style.width = percent + "%";
+    }
+
+    // 모든 보기 버튼 비활성화
+    function disableChoices() {
+      const buttons = document.querySelectorAll(".choice-button");
+      buttons.forEach(btn => {
+        btn.classList.add("disabled");
+        btn.disabled = true;
+      });
+    }
+
+    // 정답 표시 (정답 버튼 테두리 강조)
+    function showCorrectAnswer() {
+      const buttons = document.querySelectorAll(".choice-button");
+      buttons.forEach(btn => {
+        if (btn.innerHTML === currentQuestion.correct) {
+          btn.style.border = "2px solid #0000ff";
+        }
+      });
+    }
+
+    // "다음문제" 버튼 이벤트
+    document.getElementById("nextButton").addEventListener("click", () => {
+      if (chances <= 0) {
+        gameOver();
+      } else {
+        loadNextQuestion();
+      }
+    });
+
+    // 게임 오버 처리
+    function gameOver() {
+      clearInterval(overallTimer);
+      clearInterval(questionTimer);
+      clearInterval(energyBarInterval);
+      document.getElementById("gameScreen").style.display = "none";
+      document.getElementById("gameOverScreen").style.display = "block";
+      document.getElementById("finalScoreDisplay").innerText = "최종 점수: " + score;
+      document.getElementById("finalTimeDisplay").innerText = "총 경과 시간: " + overallTime + "초";
+    }
+
+    // 미리 출제된 문제가 끝나면 랜덤 문제 생성
+    function generateRandomQuestion() {
+      const type = Math.floor(Math.random() * 4) + 1;
+      if (type === 1) return generateRandomType1();
+      else if (type === 2) return generateRandomType2();
+      else if (type === 3) return generateRandomType3();
+      else return generateRandomType4();
+    }
+
+    // 타입 1: 나머지 문제 생성
+    function generateRandomType1() {
+      const possibleD = [6, 8, 10, 12, 16, 18, 20, 24, 30];
+      const d = possibleD[Math.floor(Math.random() * possibleD.length)];
+      const r1 = Math.floor(Math.random() * (d - 2)) + 1;
+      const r2 = Math.floor(Math.random() * (d - 2)) + 1;
+      const k = Math.floor(Math.random() * 4) + 2;
+      const mVal = Math.floor(Math.random() * 4) + 2;
+      const A = d * k + r1;
+      const B = d * mVal + r2;
+      const maxR = Math.max(r1, r2);
+      let divisors = [];
+      for (let i = 1; i <= d; i++) {
+        if (d % i === 0 && i > maxR) divisors.push(i);
+      }
+      const answer = divisors.length;
+      let choices = [answer, answer + 1, answer - 1, answer + 2, answer - 2];
+      choices = choices.map(n => m(n));
+      while (choices.length < 5) { 
+        choices.push(m(answer + Math.floor(Math.random() * 3) + 1)); 
+      }
+      return {
+        question: "어떤 자연수로 " + m(A) + "을 나누면 " + m(r1) + "이 남고, " + m(B) + "을 나누면 " + m(r2) + "가 남는다고 한다. 이와 같은 자연수의 개수는?",
+        correct: m(answer),
+        choices: choices.slice(0,5)
+      };
+    }
+
+    // 타입 2: 색도화지 자르기 문제 생성
+    function generateRandomType2() {
+      const g = Math.floor(Math.random() * 7) + 2;
+      const a = Math.floor(Math.random() * 9) + 2;
+      const b = Math.floor(Math.random() * 9) + 2;
+      const L = g * a;
+      const W = g * b;
+      const answer = a * b;
+      let choices = [answer, answer + 1, answer - 1, answer + 2, answer - 2];
+      choices = choices.map(n => m(n));
+      while (choices.length < 5) { 
+        choices.push(m(answer + Math.floor(Math.random() * 3) + 1)); 
+      }
+      return {
+        question: "가로가 " + m(L) + "cm, 세로가 " + m(W) + "cm인 색도화지를 잘라 가능한 한 큰 정사각형 꽃가루를 만들 때, 만들 수 있는 꽃가루의 개수는?",
+        correct: m(answer),
+        choices: choices.slice(0,5)
+      };
+    }
+
+    // 타입 3: 땅 둘레 나무 심기 문제 생성
+    function generateRandomType3() {
+      const g = Math.floor(Math.random() * 7) + 2;
+      const a = Math.floor(Math.random() * 9) + 2;
+      const b = Math.floor(Math.random() * 9) + 2;
+      const L = g * a;
+      const W = g * b;
+      const answer = 2 * (a + b);
+      let choices = [answer, answer + 1, answer - 1, answer + 2, answer - 2];
+      choices = choices.map(n => m(n));
+      while (choices.length < 5) { 
+        choices.push(m(answer + Math.floor(Math.random() * 3) + 1)); 
+      }
+      return {
+        question: "가로가 " + m(L) + "cm, 세로가 " + m(W) + "cm인 땅 둘레에 나무를 심을 때, 나무 사이 간격을 최대화하면 필요한 나무의 그루 수는?",
+        correct: m(answer),
+        choices: choices.slice(0,5)
+      };
+    }
+
+    // 타입 4: 분수 곱셈 문제 생성
+    function generateRandomType4() {
+      const B = Math.floor(Math.random() * 11) + 20;
+      const D = Math.floor(Math.random() * 11) + 20;
+      const A = B + Math.floor(Math.random() * 10) + 1;
+      const C = D - (Math.floor(Math.random() * Math.min(10, D - 1)) + 1);
+      function gcd(x, y) { return y === 0 ? x : gcd(y, x % y); }
+      function lcm(x, y) { return x * y / gcd(x, y); }
+      const L = lcm(B, D);
+      const num1 = (A * L) / B;
+      const num2 = (C * L) / D;
+      const common = gcd(num1, num2);
+      let answerStr;
+      if (L % common === 0) {
+        answerStr = m(L / common);
+      } else {
+        answerStr = m(String.raw`\dfrac{${L}}{${common}}`);
+      }
+      let choices = [
+        answerStr,
+        m(String.raw`\dfrac{${L}}{${common + 1}}`),
+        m(String.raw`\dfrac{${L}}{${common + 2}}`),
+        m(String.raw`\dfrac{${L}}{${Math.max(common - 1, 1)}}`),
+        m(String.raw`\dfrac{${L}}{${Math.max(common - 2, 1)}}`)
+      ];
+      return {
+        question: "두 분수 " + m(String.raw`\dfrac{${A}}{${B}}`) + "과 " + m(String.raw`\dfrac{${C}}{${D}}`) + " 중 어느 것을 택하여 곱해도 자연수가 되도록 하는 가장 작은 기약분수는?",
+        correct: answerStr,
+        choices: choices.slice(0,5)
+      };
+    }
+
+    // 점수전송 함수
+    function saveData(game, name, score, elapsedTime) {
+      const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+      const requestData = {
+        game,
+        name,
+        score: parseInt(score, 10),
+        elapsedTime: parseInt(elapsedTime, 10)
+      };
+      try {
+        const response = fetch(FUNCTION_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestData)
+        });
+        response.then(res => res.json()).then(responseData => {
+          if (response.ok) {
+            document.getElementById('response').innerText = "성공: " + JSON.stringify(responseData, null, 2);
+          } else {
+            document.getElementById('response').innerText = "오류: " + JSON.stringify(responseData, null, 2);
+          }
+        });
+      } catch (error) {
+        console.error('요청 실패:', error);
+        document.getElementById('response').innerText = "네트워크 오류: " + error.message;
+      }
+    }
+
+    // "점수전송" 버튼 이벤트
+    document.getElementById("sendScoreButton").addEventListener("click", () => {
+      saveData("약수와 배수 심화(1)", userName, score, overallTime);
+    });
+  </script>
+</body>
+</html>
